@@ -4,7 +4,7 @@ import {
   Star, Shield, Cpu, Terminal, RefreshCw, Copy, Check,
   Loader2, Key, Eye, EyeOff, X,
 } from "lucide-react";
-import { claudeConvertCode, claudeDetectAndConvertCode, getApiKey, setApiKey, clearApiKey, hasApiKey, ApiKeyError, ClaudeApiError } from "./claude.js";
+import { claudeConvertCode, claudeDetectAndConvertCode, getApiKey, setApiKey, clearApiKey, hasApiKey, requiresApiKey, ApiKeyError, ClaudeApiError } from "./claude.js";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — defined outside components (never re-allocated on render)
@@ -86,6 +86,7 @@ function highlight(code) {
 // API KEY MODAL — shown on first launch if no key is configured
 // ═══════════════════════════════════════════════════════════════════════════════
 function ApiKeyModal({ onSave }) {
+  if (!requiresApiKey()) return null;
   const [key, setKey]     = useState('');
   const [show, setShow]   = useState(false);
   const [error, setError] = useState('');
@@ -505,12 +506,14 @@ function ConverterPage({ onHome, onKeyRequired }) {
           style={{ borderColor: '#333', color: '#aaa', background: '#111' }}>← Home</button>
         <Code className="w-5 h-5" style={{ color: '#fff' }} />
         <h1 className="text-lg font-bold flex-1">CodeVerse</h1>
-        <button onClick={() => onKeyRequired()}
-          className="text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1"
-          style={{ borderColor: '#333', color: '#888', background: '#111' }}
-          title="Change API key">
-          <Key className="w-3 h-3" /> Key
-        </button>
+        {requiresApiKey() && (
+          <button onClick={() => onKeyRequired()}
+            className="text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1"
+            style={{ borderColor: '#333', color: '#888', background: '#111' }}
+            title="Change API key">
+            <Key className="w-3 h-3" /> Key
+          </button>
+        )}
         <button onClick={() => setShowHelp(true)}
           className="text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1"
           style={{ borderColor: '#333', color: '#fff', background: '#111' }}>❓ Help</button>
@@ -1050,7 +1053,7 @@ function HelpModal({ onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [page,        setPage]        = useState('home');
-  const [showKeyModal, setShowKeyModal] = useState(!hasApiKey());
+  const [showKeyModal, setShowKeyModal] = useState(requiresApiKey() && !hasApiKey());
 
   const handleKeySaved = useCallback(() => setShowKeyModal(false), []);
 
