@@ -13,7 +13,8 @@
 
 const SESSION_KEY = 'cv_anthropic_key';
 const MODEL = 'claude-sonnet-4-20250514';
-const API_URL = 'https://api.anthropic.com/v1/messages';
+const DEFAULT_API_URL = 'https://api.anthropic.com/v1/messages';
+const API_URL = (import.meta.env.VITE_ANTHROPIC_API_URL ?? DEFAULT_API_URL).trim() || DEFAULT_API_URL;
 const API_VERSION = '2023-06-01';
 const REQUEST_TIMEOUT_MS = 45000;
 const MAX_RETRIES = 2;
@@ -35,8 +36,12 @@ export function clearApiKey() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+export function requiresApiKey() {
+  return API_URL === DEFAULT_API_URL;
+}
+
 export function hasApiKey() {
-  return Boolean(getApiKey());
+  return !requiresApiKey() || Boolean(getApiKey());
 }
 
 function sleep(ms) {
@@ -70,7 +75,7 @@ async function parseErrorResponse(res) {
 
 async function callAnthropic({ system, messages, maxTokens = 4096, temperature = 0 }) {
   const key = getApiKey();
-  if (!key) throw new ApiKeyError('No Anthropic API key configured.');
+  if (requiresApiKey() && !key) throw new ApiKeyError('No Anthropic API key configured.');
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -81,10 +86,12 @@ async function callAnthropic({ system, messages, maxTokens = 4096, temperature =
         method: 'POST',
         signal: controller.signal,
         headers: {
-          'x-api-key': key,
-          'anthropic-version': API_VERSION,
           'content-type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          ...(requiresApiKey() ? {
+            'x-api-key': key,
+            'anthropic-version': API_VERSION,
+            'anthropic-dangerous-direct-browser-access': 'true',
+          } : {}),
         },
         body: JSON.stringify({
           model: MODEL,
