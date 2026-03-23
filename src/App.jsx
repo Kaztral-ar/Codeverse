@@ -4,7 +4,7 @@ import {
   Star, Shield, Cpu, Terminal, RefreshCw, Copy, Check,
   Loader2, Key, Eye, EyeOff, X,
 } from "lucide-react";
-import { claudeComplete, getApiKey, setApiKey, clearApiKey, hasApiKey, ApiKeyError } from "./claude.js";
+import { claudeConvertCode, claudeDetectAndConvertCode, getApiKey, setApiKey, clearApiKey, hasApiKey, ApiKeyError, ClaudeApiError } from "./claude.js";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — defined outside components (never re-allocated on render)
@@ -435,28 +435,25 @@ function ConverterPage({ onHome, onKeyRequired }) {
     setLoading(true); setError(''); setOut(''); setDetectedLang('');
     try {
       if (srcLang === 'Auto-Detect') {
-        const raw = await claudeComplete(
-          `Detect the programming language of the code below, then convert it to ${tgtLang}.
-Respond ONLY with a JSON object — no markdown, no backticks, no explanation:
-{"detectedLanguage":"<name>","code":"<converted code>"}
-
-Code:
-${src}`
-        );
-        try {
-          const parsed = JSON.parse(raw.trim());
-          setOut(parsed.code ?? raw);
-          if (parsed.detectedLanguage) setDetectedLang(parsed.detectedLanguage);
-        } catch { setOut(raw); }
+        const parsed = await claudeDetectAndConvertCode({
+          sourceCode: src,
+          targetLanguage: tgtLang,
+        });
+        setOut(parsed.code);
+        if (parsed.detectedLanguage) setDetectedLang(parsed.detectedLanguage);
       } else {
-        const result = await claudeComplete(
-          `Convert the following ${srcLang} code to ${tgtLang}. Return only the converted code with no explanation or markdown:\n\n${src}`
-        );
+        const result = await claudeConvertCode({
+          sourceCode: src,
+          sourceLanguage: srcLang,
+          targetLanguage: tgtLang,
+        });
         setOut(result);
       }
     } catch (err) {
       if (err.name === 'ApiKeyError') {
         setError('Invalid or missing API key.'); onKeyRequired();
+      } else if (err instanceof ClaudeApiError) {
+        setError(err.message);
       } else {
         setError('Conversion failed. Please try again.');
       }
