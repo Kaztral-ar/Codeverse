@@ -4,7 +4,7 @@ import {
   Star, Shield, Cpu, Terminal, RefreshCw, Copy, Check,
   Loader2, Key, Eye, EyeOff, X,
 } from "lucide-react";
-import { claudeConvertCode, claudeDetectAndConvertCode, getApiKey, setApiKey, clearApiKey, hasApiKey, requiresApiKey, ApiKeyError, ClaudeApiError } from "./claude.js";
+import { claudeConvertCode, claudeDetectAndConvertCode, getActiveProvider, getProviderMeta, getProviders, setActiveProvider, setApiKey, hasApiKey, requiresApiKey, ApiKeyError, ClaudeApiError } from "./claude.js";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — defined outside components (never re-allocated on render)
@@ -85,19 +85,25 @@ function highlight(code) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // API KEY MODAL — shown on first launch if no key is configured
 // ═══════════════════════════════════════════════════════════════════════════════
-function ApiKeyModal({ onSave }) {
-  if (!requiresApiKey()) return null;
+function ApiKeyModal({ provider, onProviderChange, onSave }) {
+  const providerMeta = useMemo(() => getProviderMeta(provider), [provider]);
   const [key, setKey]     = useState('');
   const [show, setShow]   = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    setKey('');
+    setError('');
+    setShow(false);
+  }, [provider]);
+
   const handleSave = () => {
     const trimmed = key.trim();
-    if (!trimmed.startsWith('sk-ant-')) {
-      setError('Key should start with "sk-ant-". Get one at console.anthropic.com');
+    if (!trimmed.startsWith(providerMeta.keyPrefix)) {
+      setError(`Key should start with "${providerMeta.keyPrefix}".`);
       return;
     }
-    setApiKey(trimmed);
+    setApiKey(trimmed, provider);
     onSave();
   };
 
@@ -123,13 +129,32 @@ function ApiKeyModal({ onSave }) {
         {/* Body */}
         <div className="px-6 py-5 flex flex-col gap-4">
           <p className="text-sm leading-relaxed" style={{ color: '#888' }}>
-            CodeVerse uses the Anthropic API to convert code. Your key is stored only
-            in this browser tab and cleared when you close it.
+            CodeVerse can use Anthropic, Gemini, or OpenRouter free models. Keys stay only
+            in this browser tab and are cleared when the tab closes.
           </p>
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium" style={{ color: '#aaa' }}>
-              Anthropic API Key
+              API Provider
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {getProviders().map(option => (
+                <button key={option.id} type="button" onClick={() => onProviderChange(option.id)}
+                  className="px-3 py-2 rounded-lg border text-sm text-left"
+                  style={{
+                    background: provider === option.id ? '#fff' : '#000',
+                    color: provider === option.id ? '#000' : '#ccc',
+                    borderColor: provider === option.id ? '#fff' : '#333',
+                  }}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium" style={{ color: '#aaa' }}>
+              {providerMeta.label} API Key
             </label>
             <div className="flex items-center rounded-lg overflow-hidden border"
               style={{ background: '#000', borderColor: error ? '#ff6b6b' : '#333' }}>
@@ -138,7 +163,7 @@ function ApiKeyModal({ onSave }) {
                 value={key}
                 onChange={e => { setKey(e.target.value); setError(''); }}
                 onKeyDown={e => e.key === 'Enter' && handleSave()}
-                placeholder="sk-ant-api03-…"
+                placeholder={providerMeta.keyPlaceholder}
                 autoFocus
                 className="flex-1 px-4 py-2.5 bg-transparent text-sm outline-none font-mono"
                 style={{ color: '#fff' }}
@@ -151,10 +176,10 @@ function ApiKeyModal({ onSave }) {
             {error && <p className="text-xs" style={{ color: '#ff6b6b' }}>{error}</p>}
           </div>
 
-          <a href="https://console.anthropic.com/keys" target="_blank" rel="noreferrer"
+          <a href={providerMeta.helpUrl} target="_blank" rel="noreferrer"
             className="text-xs inline-flex items-center gap-1"
             style={{ color: '#555' }}>
-            Get a free API key at console.anthropic.com →
+            {providerMeta.helpLabel} →
           </a>
         </div>
 
@@ -379,7 +404,7 @@ function CodePanel({ value = '', onChange, readOnly = false, placeholder, loadin
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONVERTER PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
-function ConverterPage({ onHome, onKeyRequired }) {
+function ConverterPage({ provider, onProviderChange, onHome, onKeyRequired }) {
   const [src,          setSrc]          = useState(EXAMPLE_SRC);
   const [out,          setOut]          = useState('');
   const [srcLang,      setSrcLang]      = useState('Python');
@@ -397,6 +422,7 @@ function ConverterPage({ onHome, onKeyRequired }) {
   const [ghError,      setGhError]      = useState('');
   const [showHelp,     setShowHelp]     = useState(false);
   const fileRef = useRef(null);
+  const providerMeta = useMemo(() => getProviderMeta(provider), [provider]);
 
   // ── File upload ─────────────────────────────────────────────────────────────
   const handleFile = e => {
@@ -432,13 +458,14 @@ function ConverterPage({ onHome, onKeyRequired }) {
   // ── Convert ──────────────────────────────────────────────────────────────
   const convert = async () => {
     if (!src.trim()) { setError('Please enter some code to convert.'); return; }
-    if (!hasApiKey()) { onKeyRequired(); return; }
+    if (!hasApiKey(provider)) { onKeyRequired(); return; }
     setLoading(true); setError(''); setOut(''); setDetectedLang('');
     try {
       if (srcLang === 'Auto-Detect') {
         const parsed = await claudeDetectAndConvertCode({
           sourceCode: src,
           targetLanguage: tgtLang,
+          providerId: provider,
         });
         setOut(parsed.code);
         if (parsed.detectedLanguage) setDetectedLang(parsed.detectedLanguage);
@@ -447,6 +474,7 @@ function ConverterPage({ onHome, onKeyRequired }) {
           sourceCode: src,
           sourceLanguage: srcLang,
           targetLanguage: tgtLang,
+          providerId: provider,
         });
         setOut(result);
       }
@@ -506,7 +534,13 @@ function ConverterPage({ onHome, onKeyRequired }) {
           style={{ borderColor: '#333', color: '#aaa', background: '#111' }}>← Home</button>
         <Code className="w-5 h-5" style={{ color: '#fff' }} />
         <h1 className="text-lg font-bold flex-1">CodeVerse</h1>
-        {requiresApiKey() && (
+        <div className="hidden md:flex items-center gap-2 rounded-lg border px-3 py-1.5" style={{ borderColor: '#333', background: '#111', color: '#aaa' }}>
+          <span className="text-xs">Provider</span>
+          <select value={provider} onChange={e => onProviderChange(e.target.value)} className="bg-transparent text-xs outline-none" style={{ color: '#fff' }}>
+            {getProviders().map(option => <option key={option.id} value={option.id} style={{ color: '#000' }}>{option.label}</option>)}
+          </select>
+        </div>
+        {requiresApiKey(provider) && (
           <button onClick={() => onKeyRequired()}
             className="text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1"
             style={{ borderColor: '#333', color: '#888', background: '#111' }}
@@ -564,6 +598,15 @@ function ConverterPage({ onHome, onKeyRequired }) {
               ? <><Loader2 className="w-4 h-4 animate-spin" />Converting…</>
               : <><Code className="w-4 h-4" />Convert Code</>}
           </button>
+
+          <div className="flex flex-wrap items-center justify-center gap-2 text-xs" style={{ color: '#777' }}>
+            <span className="px-2.5 py-1 rounded-full border" style={{ borderColor: '#222', background: '#0a0a0a' }}>
+              Provider: <span style={{ color: '#fff' }}>{providerMeta.label}</span>
+            </span>
+            <span className="px-2.5 py-1 rounded-full border" style={{ borderColor: '#222', background: '#0a0a0a' }}>
+              Model: <span style={{ color: '#fff' }}>{providerMeta.model}</span>
+            </span>
+          </div>
 
           {error && (
             <div className="px-4 py-2 rounded-lg text-sm text-center border"
@@ -807,7 +850,7 @@ function HomePage({ onLaunch }) {
     { icon: Zap,       title: 'Instant Conversion',  desc: 'Convert any code in seconds with high accuracy.' },
     { icon: Globe,     title: '100+ Languages',       desc: 'From Python to Zig, Assembly to .ore — the widest coverage available.' },
     { icon: Download,  title: 'Download Instantly',   desc: 'Save converted code with the correct file extension.' },
-    { icon: Shield,    title: 'Private & Secure',     desc: 'Your code is never stored. Every conversion is isolated.' },
+    { icon: Shield,    title: 'Bring Your Own API',  desc: 'Use Anthropic, Gemini, or OpenRouter free models with your own key.' },
     { icon: RefreshCw, title: 'Bidirectional',        desc: 'Convert in any direction — swap languages freely.' },
     { icon: Cpu,       title: 'Smart Conversion',     desc: 'Intelligent conversion that preserves logic and intent.' },
   ];
@@ -957,7 +1000,7 @@ function HelpModal({ onClose }) {
     overview: { title: 'What is CodeVerse?', steps: [
       { icon: '1️⃣', heading: 'Load your code',    desc: 'Paste code, upload a file, or load directly from a public GitHub URL.' },
       { icon: '2️⃣', heading: 'Pick languages',    desc: 'Select the source language (or use ✦ Auto-Detect) and your target.' },
-      { icon: '3️⃣', heading: 'Convert',           desc: 'Hit Convert Code — the AI translates and shows the result.' },
+      { icon: '3️⃣', heading: 'Convert',           desc: 'Choose your provider, then hit Convert Code — the AI translates and shows the result.' },
       { icon: '4️⃣', heading: 'Download or Copy', desc: 'Copy to clipboard or download with the correct file extension.' },
     ]},
     paste: { title: '✏️ How to use Paste', steps: [
@@ -1052,17 +1095,26 @@ function HelpModal({ onClose }) {
 // APP ROOT — manages page routing + API key state
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [page,        setPage]        = useState('home');
-  const [showKeyModal, setShowKeyModal] = useState(requiresApiKey() && !hasApiKey());
+  const [page, setPage] = useState('home');
+  const [provider, setProvider] = useState(() => getActiveProvider());
+  const [showKeyModal, setShowKeyModal] = useState(() => requiresApiKey(getActiveProvider()) && !hasApiKey(getActiveProvider()));
+
+  const handleProviderChange = useCallback(nextProvider => {
+    setProvider(nextProvider);
+    setActiveProvider(nextProvider);
+    setShowKeyModal(requiresApiKey(nextProvider) && !hasApiKey(nextProvider));
+  }, []);
 
   const handleKeySaved = useCallback(() => setShowKeyModal(false), []);
 
   return (
     <>
-      {showKeyModal && <ApiKeyModal onSave={handleKeySaved} />}
+      {showKeyModal && <ApiKeyModal provider={provider} onProviderChange={handleProviderChange} onSave={handleKeySaved} />}
       {page === 'home'
         ? <HomePage onLaunch={() => setPage('converter')} />
         : <ConverterPage
+            provider={provider}
+            onProviderChange={handleProviderChange}
             onHome={() => setPage('home')}
             onKeyRequired={() => setShowKeyModal(true)} />}
     </>
